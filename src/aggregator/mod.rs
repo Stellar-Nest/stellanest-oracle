@@ -3,6 +3,9 @@ use tracing::debug;
 
 use crate::sources::DataPoint;
 
+/// Data older than this is considered stale (matches UPDATE_INTERVAL_HOURS default).
+const STALENESS_THRESHOLD_SECS: u64 = 6 * 3600; // 6 hours
+
 /// Aggregated price result for a city.
 #[derive(Debug, Clone, Serialize)]
 pub struct AggregatedResult {
@@ -11,6 +14,7 @@ pub struct AggregatedResult {
     pub confidence: f64,
     pub source_count: usize,
     pub is_stale: bool,
+    pub timestamp: u64,
 }
 
 /// Aggregator removes outliers and computes weighted averages.
@@ -26,6 +30,8 @@ impl Aggregator {
 
     /// Aggregate data points for a city into a single price estimate.
     pub fn aggregate(&self, city: &str, points: &[DataPoint]) -> AggregatedResult {
+        let now = chrono::Utc::now().timestamp() as u64;
+
         if points.is_empty() {
             return AggregatedResult {
                 city_code: city.to_string(),
@@ -33,14 +39,59 @@ impl Aggregator {
                 confidence: 0.0,
                 source_count: 0,
                 is_stale: true,
+                timestamp: now,
             };
         }
 
-        // Remove outliers
-        let filtered = self.remove_outliers(points);
-        let working = if filtered.is_empty() { points } else { &filtered };
+        // Filter out stale data points
+        let fresh_points: Vec<&DataPoint> = points
+            .iter()
+            .filter(|p| {
+                let age = now.saturating_sub(p.timestamp as u64);
+                age < STALENESS_THRESHOLD_SECS
+            })
+            .collect();
 
-        // Weighted average (weight = confidence)
+        if fresh_points.is_empty() {
+            debug!(
+                city,
+                total = points.len(),
+                "all data points are stale (older than {}s)", STALENESS_THRESHOLD_SECS
+            );
+            return AggregatedResult {
+                city_code: city.to_string(),
+                price: 0.0,
+                confidence: 0.0,
+                source_count: 0,
+                is_stale: true,
+                timestamp: now,
+            };
+        }
+
+        // Calculate freshness-adjusted confidence for each point.
+        // Points right at the threshold get near-zero weight; fresh points keep full confidence.
+        let adjusted: Vec<DataPoint> = fresh_points
+            .iter()
+            .map(|p| {
+                let age = now.saturating_sub(p.timestamp as u64) as f64;
+                let threshold = STALENESS_THRESHOLD_SECS as f64;
+                // Linear decay: 1.0 when age=0, approaching 0.0 as age approaches threshold
+                let freshness_factor = 1.0 - (age / threshold);
+                DataPoint {
+                    city_code: p.city_code.clone(),
+                    value: p.value,
+                    source: p.source.clone(),
+                    confidence: p.confidence * freshness_factor,
+                    timestamp: p.timestamp,
+                }
+            })
+            .collect();
+
+        // Remove outliers from the freshness-adjusted set
+        let filtered = self.remove_outliers(&adjusted);
+        let working = if filtered.is_empty() { &adjusted } else { &filtered };
+
+        // Weighted average (weight = freshness-adjusted confidence)
         let total_weight: f64 = working.iter().map(|p| p.confidence).sum();
         let price = if total_weight > 0.0 {
             working.iter().map(|p| p.value * p.confidence).sum::<f64>() / total_weight
@@ -54,8 +105,8 @@ impl Aggregator {
             city,
             price,
             confidence = avg_confidence,
-            sources = working.len(),
-            raw = points.len(),
+            fresh_sources = fresh_points.len(),
+            total_sources = points.len(),
             "aggregated"
         );
 
@@ -65,6 +116,7 @@ impl Aggregator {
             confidence: avg_confidence,
             source_count: working.len(),
             is_stale: false,
+            timestamp: now,
         }
     }
 
