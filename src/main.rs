@@ -85,7 +85,7 @@ async fn run_cycle(
         let points = city_points.get(city).cloned().unwrap_or_default();
         let result = agg.aggregate(city, &points);
 
-        if !result.is_stale && result.source_count >= 3 {
+        if !result.is_stale && result.source_count >= agg.min_sources as usize {
             results.push(result);
         } else {
             tracing::warn!(city, sources = result.source_count, stale = result.is_stale, "insufficient data");
