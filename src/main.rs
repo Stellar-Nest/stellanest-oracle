@@ -44,12 +44,23 @@ async fn main() -> anyhow::Result<()> {
     let agg = aggregator::Aggregator::new(3.0, 3);
     let sub = submitter::Submitter::new(db.clone(), &oracle_secret);
 
-    // Run immediately, then on interval
+    // Run immediately, then on interval with graceful shutdown
+    tracing::info!("starting initial oracle cycle");
     run_cycle(&all_sources, &agg, &sub, LAUNCH_CITIES).await;
+    tracing::info!("initial oracle cycle complete");
 
-    loop {
-        sleep(Duration::from_secs(update_hours * 3600)).await;
-        run_cycle(&all_sources, &agg, &sub, LAUNCH_CITIES).await;
+    tokio::select! {
+        _ = async {
+            loop {
+                sleep(Duration::from_secs(update_hours * 3600)).await;
+                tracing::info!("starting scheduled oracle cycle");
+                run_cycle(&all_sources, &agg, &sub, LAUNCH_CITIES).await;
+                tracing::info!("scheduled oracle cycle complete");
+            }
+        } => {}
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("received shutdown signal, exiting gracefully");
+        }
     }
 }
 
