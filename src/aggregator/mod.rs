@@ -16,7 +16,7 @@ pub struct AggregatedResult {
 /// Aggregator removes outliers and computes weighted averages.
 pub struct Aggregator {
     outlier_stddev: f64,
-    min_sources: usize,
+    pub min_sources: usize,
 }
 
 impl Aggregator {
@@ -38,7 +38,17 @@ impl Aggregator {
 
         // Remove outliers
         let filtered = self.remove_outliers(points);
-        let working = if filtered.is_empty() { points } else { &filtered };
+        if filtered.is_empty() {
+            tracing::warn!("all data points flagged as outliers for city, marking stale");
+            return AggregatedResult {
+                city_code: city.to_string(),
+                price: 0.0,
+                confidence: 0.0,
+                source_count: points.len(),
+                is_stale: true,
+            };
+        }
+        let working = &filtered;
 
         // Weighted average (weight = confidence)
         let total_weight: f64 = working.iter().map(|p| p.confidence).sum();
