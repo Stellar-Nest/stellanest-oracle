@@ -26,8 +26,15 @@ async fn main() -> anyhow::Result<()> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://stellanest:stellanest@localhost:5432/stellanest".into());
     let zillow_key = std::env::var("ZILLOW_API_KEY").unwrap_or_default();
+    if zillow_key.is_empty() {
+        tracing::warn!("ZILLOW_API_KEY not set — Zillow source will use mock data");
+    }
     let numbeo_key = std::env::var("NUMBEO_API_KEY").unwrap_or_default();
-    let oracle_secret = std::env::var("ORACLE_SECRET_KEY").unwrap_or_default();
+    if numbeo_key.is_empty() {
+        tracing::warn!("NUMBEO_API_KEY not set — Numbeo source will use mock data");
+    }
+    let oracle_secret = std::env::var("ORACLE_SECRET_KEY")
+        .expect("ORACLE_SECRET_KEY environment variable is required");
 
     let update_hours: u64 = std::env::var("UPDATE_INTERVAL_HOURS")
         .ok()
