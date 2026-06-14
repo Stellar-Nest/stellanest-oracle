@@ -49,11 +49,17 @@ impl<'a> Submitter<'a> {
     /// Submit multiple city prices.
     pub async fn submit_batch(&self, results: &[AggregatedResult]) -> anyhow::Result<()> {
         info!(count = results.len(), "batch submitting prices");
+        let mut errors = Vec::new();
 
         for result in results {
             if let Err(e) = self.submit(result).await {
                 error!(city = %result.city_code, error = %e, "submit failed");
+                errors.push(format!("{}: {}", result.city_code, e));
             }
+        }
+
+        if !errors.is_empty() {
+            anyhow::bail!("{} submissions failed: {}", errors.len(), errors.join(", "));
         }
 
         Ok(())
