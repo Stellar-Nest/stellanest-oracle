@@ -95,7 +95,8 @@ pub fn weighted_median(points: &[DataPoint]) -> f64 {
     }
 
     let mut sorted = points.to_vec();
-    sorted.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+    sorted.retain(|dp| !dp.value.is_nan());
+    sorted.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(std::cmp::Ordering::Equal));
 
     let total_weight: f64 = sorted.iter().map(|p| p.confidence).sum();
     let mut cumulative = 0.0;
